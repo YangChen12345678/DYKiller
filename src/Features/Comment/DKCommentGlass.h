@@ -22,6 +22,9 @@ UIView *DKCommentGlassCurrentSlot(void);
 /// 它的尺寸由抖音在常驻态与回复态之间来回改，探针据此核对玻璃有没有跟上。
 UIView *DKCommentGlassCurrentField(void);
 
+/// 最近的目标评论 UILabel 渲染事件；只含地址、状态与入口，不包含评论文字。
+NSString *DKCommentGlassDiagnosticReport(void);
+
 #ifdef __cplusplus
 }
 #endif
