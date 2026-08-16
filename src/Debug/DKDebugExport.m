@@ -179,6 +179,9 @@ static NSString *DKReadme(DKDebugExportContext *context, DKDebugExportMode mode)
          capture.actualState ?: @"unknown"];
     } else {
         [text appendString:@"Contents:\n- page/: UI 主线程快照与本页类\n"];
+        [text appendString:@"- page/comment-render-trace.jsonl: 评论 Cell/文字/CA 因果时间线\n"];
+        [text appendString:@"- page/comment-render-summary.json: 探针完整性与运行时方法清单\n"];
+        [text appendString:@"- page/comment-render-snapshot.json: 可见评论私有文字层快照\n"];
         [text appendString:@"- probe/tabbar.txt: 液态玻璃底栏现场\n- ui/: 目标窗口截图\n"];
     }
     return text;
@@ -214,6 +217,12 @@ static void DKWritePageFiles(DKExportSink *sink,
     DKWriteJSON(sink, @"page/selected-view.json", context.selectedViewJSON ?: @{}, NO);
     DKWriteString(sink, @"page/view-controllers.txt", context.viewControllersText, NO);
     DKWriteJSON(sink, @"page/layers.json", context.layersJSON ?: @[], NO);
+    DKWriteString(sink, @"page/comment-render-trace.jsonl",
+                  context.commentRenderTraceJSONL ?: @"", NO);
+    DKWriteJSON(sink, @"page/comment-render-summary.json",
+                context.commentRenderSummaryJSON ?: @{}, NO);
+    DKWriteJSON(sink, @"page/comment-render-snapshot.json",
+                context.commentRenderSnapshotJSON ?: @{}, NO);
     if (progress) progress(@"导出本页类头文件...");
     DKWritePageClasses(sink, context.pageClassNames ?: @[]);
 }

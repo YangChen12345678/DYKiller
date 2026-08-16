@@ -27,6 +27,10 @@
 @property (nonatomic, strong) NSArray<NSString *> *pageClassNames;
 /// 主线程生成的探针文本（probe/tabbar.txt）；后台导出只落盘，不再读 UIKit。
 @property (nonatomic, copy) NSString *probeText;
+/// iOS 27 评论白块因果探针；均在主线程采集完毕，后台只负责落盘。
+@property (nonatomic, copy) NSString *commentRenderTraceJSONL;
+@property (nonatomic, strong) NSDictionary *commentRenderSummaryJSON;
+@property (nonatomic, strong) NSDictionary *commentRenderSnapshotJSON;
 /// 音频专项模式的五秒采样产物；普通页面/全类导出时为 nil。
 @property (nonatomic, strong) DKAudioProbeCapture *audioCapture;
 @property (nonatomic, weak) UIView *sourceView;

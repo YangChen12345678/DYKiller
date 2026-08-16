@@ -7,6 +7,7 @@
 //
 
 #import "DKDebugCapture.h"
+#import "DKCommentRenderProbe.h"
 #import "DKKeys.h"
 #import "DKClassDump.h"
 #import <QuartzCore/QuartzCore.h>
@@ -500,6 +501,10 @@ DKDebugExportContext *DKDebugCaptureContext(UIWindow *targetWindow, CGPoint poin
     context.screenshotPNG = DKScreenshotPNG(targetWindow);
     context.summary = summary;
     context.pageClassNames = pageClasses.allObjects;
+    // 必须在主线程冻结：后台导出阶段不再碰 UIKit / CALayer。
+    context.commentRenderSnapshotJSON = DKCommentRenderProbeCurrentSnapshotJSON();
+    context.commentRenderTraceJSONL = DKCommentRenderProbeTraceJSONL();
+    context.commentRenderSummaryJSON = DKCommentRenderProbeSummaryJSON();
     context.sourceView = targetWindow;
     context.presenter = DKDebugTopPresenter(targetWindow);
     return context;

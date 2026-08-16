@@ -9,6 +9,7 @@
 #import "DKTabBarProbe.h"
 #import "DouyinHeaders.h"
 #import "DKCommentGlass.h"
+#import "DKCommentRenderProbe.h"
 #import "DKGlassFlexView.h"
 #import "DKGlassTabBar.h"
 #import "DKKeys.h"
@@ -264,6 +265,8 @@ static void DKProbeAppendCommentGlass(NSMutableString *out) {
     BOOL clear = DKPrefBool(DKKeyCommentGlassClear);
     [out appendFormat:@"总开关               = %@  配置目标=%@  interactive=固定 YES\n",
      enabled ? @"开" : @"关", clear ? @"Clear" : @"Regular"];
+    [out appendFormat:@"%@\n", DKCommentGlassDiagnosticReport()];
+    [out appendFormat:@"%@\n", DKCommentRenderProbeDiagnosticSummary()];
 
     UIView *slot = DKCommentGlassCurrentSlot();
     [out appendFormat:@"面板槽位             = %@\n", DKProbeDesc(slot)];
