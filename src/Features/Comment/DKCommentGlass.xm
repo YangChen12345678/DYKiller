@@ -56,6 +56,7 @@ static const NSTimeInterval kDKGlassAnimationDuration = 0.25;
 static char kSlotOriginalColorKey;     // 槽位：抖音写的底色
 static char kSlotGlassKey;             // 槽位：我们插的玻璃层
 static char kCoverOriginalColorKey;    // 满幅遮盖层：抖音写的底色
+static char kTextRefreshScheduledKey;  // 面板：下一轮主线程已排入文字 backing store 刷新
 static char kGlassClearModeKey;         // 玻璃：当前 effect 是否按 Clear 构造
 static char kGlassStyleKey;             // 玻璃：当前 effect 对应的场景外观
 static char kGlassMaterializingKey;     // 玻璃：已排入 materialize，防止重复排队
@@ -88,6 +89,64 @@ static BOOL DKColorIsOpaque(UIColor *color) {
 
 static BOOL DKViewIsVisible(UIView *view) {
     return view && !view.hidden && view.alpha >= 0.01;
+}
+
+// 评论列表的 UILabel 与 YYText 会缓存已经栅格化的 backing store。面板复用时，这些文字可能
+// 先在不透明白底上完成绘制，随后才由本文件把满幅背景清成透明；属性快照虽然已经是 clear /
+// opaque=NO，旧像素却仍会以黑底显示，直到点击触发下一次绘制。
+//
+// 只失效文字承载层，不碰文本、颜色或业务状态。刷新落到下一轮主线程，让抖音本轮布局和文字赋值
+// 先收敛；同一个根视图在一轮 runloop 内只排一次，避免列表布局期间重复刷新。
+static BOOL DKIsCachedTextSurface(UIView *view) {
+    if ([view isKindOfClass:UILabel.class]) return YES;
+
+    NSString *layerName = NSStringFromClass(view.layer.class);
+    return [layerName isEqualToString:@"_UILabelLayer"]
+        || [layerName isEqualToString:@"YYTextAsyncLayer"];
+}
+
+static void DKInvalidateCachedTextSurfaces(UIView *view) {
+    if (!view || [view isKindOfClass:UIVisualEffectView.class]) return;
+
+    if (DKIsCachedTextSurface(view)) {
+        [view setNeedsDisplay];
+        [view.layer setNeedsDisplay];
+    }
+    for (UIView *subview in view.subviews) {
+        DKInvalidateCachedTextSurfaces(subview);
+    }
+}
+
+static void DKScheduleTextSurfaceRefresh(UIView *root) {
+    if (!root) return;
+    if (![NSThread isMainThread]) {
+        __weak UIView *weakRoot = root;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            DKScheduleTextSurfaceRefresh(weakRoot);
+        });
+        return;
+    }
+    if ([objc_getAssociatedObject(root, &kTextRefreshScheduledKey) boolValue]) return;
+
+    objc_setAssociatedObject(root, &kTextRefreshScheduledKey,
+                             @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    __weak UIView *weakRoot = root;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIView *strongRoot = weakRoot;
+        if (!strongRoot) return;
+        objc_setAssociatedObject(strongRoot, &kTextRefreshScheduledKey,
+                                 nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        DKInvalidateCachedTextSurfaces(strongRoot);
+    });
+}
+
+// 已接管的背景再次被抖音写回不透明色时，从该视图向上找到玻璃槽位；这样多评论面板并存时，
+// 刷新仍严格落在各自子树，不依赖全局的“最近一次面板”。
+static UIView *DKTextRefreshRootForManagedView(UIView *view) {
+    for (UIView *candidate = view; candidate; candidate = candidate.superview) {
+        if (objc_getAssociatedObject(candidate, &kSlotGlassKey)) return candidate;
+    }
+    return view;
 }
 
 #pragma mark - 材质与外观
@@ -369,31 +428,35 @@ static BOOL DKIsCoverCandidate(UIView *view, UIView *slot) {
     return YES;
 }
 
-static void DKClearCoverColor(UIView *view) {
+static BOOL DKClearCoverColor(UIView *view) {
     if (objc_getAssociatedObject(view, &kCoverOriginalColorKey)) {
-        if (DKColorIsOpaque(view.backgroundColor)) view.backgroundColor = UIColor.clearColor;
-        return;
+        if (!DKColorIsOpaque(view.backgroundColor)) return NO;
+        view.backgroundColor = UIColor.clearColor;
+        return YES;
     }
-    if (!DKColorIsOpaque(view.backgroundColor)) return;
+    if (!DKColorIsOpaque(view.backgroundColor)) return NO;
     objc_setAssociatedObject(view, &kCoverOriginalColorKey,
                              view.backgroundColor, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [gClearedCovers addObject:view];
     view.backgroundColor = UIColor.clearColor;
+    return YES;
 }
 
-static void DKWalkClearCovers(UIView *view, UIView *slot, NSUInteger depth) {
-    if (depth > kDKCoverWalkDepth) return;
+static BOOL DKWalkClearCovers(UIView *view, UIView *slot, NSUInteger depth) {
+    if (depth > kDKCoverWalkDepth) return NO;
+    BOOL changed = NO;
     for (UIView *sub in view.subviews) {
         if ([sub isKindOfClass:DKGlassFlexView.class]) continue;
-        if (DKIsCoverCandidate(sub, slot)) DKClearCoverColor(sub);
+        if (DKIsCoverCandidate(sub, slot)) changed |= DKClearCoverColor(sub);
         if ([sub isKindOfClass:UILabel.class] || [sub isKindOfClass:UIImageView.class]) continue;
-        DKWalkClearCovers(sub, slot, depth + 1);
+        changed |= DKWalkClearCovers(sub, slot, depth + 1);
     }
+    return changed;
 }
 
 static void DKClearCoverLayers(UIView *slot) {
     if (!slot) return;
-    DKWalkClearCovers(slot, slot, 0);
+    if (DKWalkClearCovers(slot, slot, 0)) DKScheduleTextSurfaceRefresh(slot);
 }
 
 static void DKRestoreCoverColor(UIView *view) {
@@ -440,10 +503,10 @@ static void DKDetachGlass(UIView *slot) {
     if (!glass && !original) return;
 
     [glass removeFromSuperview];
-    if (original) slot.backgroundColor = original;
-
     objc_setAssociatedObject(slot, &kSlotOriginalColorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(slot, &kSlotGlassKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // 先解除受管标记再还原；否则下面的 UIView hook 会把这次不透明写入再次拦成 clear。
+    if (original) slot.backgroundColor = original;
 }
 
 #pragma mark - 同步
@@ -494,6 +557,7 @@ static void DKCommentGlassSync(UIViewController *controller) API_AVAILABLE(ios(2
         DKDetachGlass(backdrop);
         DKDetachGlass(field);
         DKRestoreAllCovers();
+        DKScheduleTextSurfaceRefresh(panel);
         return;
     }
 
@@ -544,7 +608,12 @@ static void DKCommentGlassSync(UIViewController *controller) API_AVAILABLE(ios(2
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
-    if (@available(iOS 26.0, *)) DKCommentGlassSync(self);
+    if (@available(iOS 26.0, *)) {
+        DKCommentGlassSync(self);
+        if (DKCommentGlassEnabled()) {
+            DKScheduleTextSurfaceRefresh(DKPanelSlot(self));
+        }
+    }
 }
 
 - (void)viewDidLayoutSubviews {
@@ -560,7 +629,9 @@ static void DKCommentGlassSync(UIViewController *controller) API_AVAILABLE(ios(2
     if ((objc_getAssociatedObject(self, &kCoverOriginalColorKey)
          || objc_getAssociatedObject(self, &kSlotOriginalColorKey))
         && DKColorIsOpaque(color)) {
+        UIView *refreshRoot = DKTextRefreshRootForManagedView(self);
         %orig(UIColor.clearColor);
+        DKScheduleTextSurfaceRefresh(refreshRoot);
         return;
     }
     %orig;
