@@ -71,16 +71,16 @@ static UIView *DKNoteTouchViewForRenderView(UIView *renderView) {
     return nil;
 }
 
-// 不含 transform 的原生 frame。
-static CGRect DKNoteNativeFrame(UIView *view) {
-    CALayer *layer = view.layer;
-    CGSize size = layer.bounds.size;
-    return CGRectMake(layer.position.x - layer.anchorPoint.x * size.width,
-                      layer.position.y - layer.anchorPoint.y * size.height, size.width, size.height);
-}
-
 static CGPoint DKNoteCenter(CGRect rect) {
     return CGPointMake(CGRectGetMidX(rect), CGRectGetMidY(rect));
+}
+
+// 顶栏收起时头像、关注框等元素还留在渲染视图里，只是尺寸归零或隐藏；
+// 按可见性筛掉它们，玻璃才不会给不存在的元素留位置。
+static BOOL DKNoteElementVisible(UIView *view) {
+    if (!view || view.hidden || view.alpha <= 0.01) return NO;
+    CGRect frame = DKAdjustLayoutFrame(view);
+    return CGRectGetWidth(frame) > 0.5 && CGRectGetHeight(frame) > 0.5;
 }
 
 static DKNoteHit *DKNoteMakeHit(CGRect rect, CGPoint target, UIView *renderView, UIView *touchView) {
@@ -126,11 +126,11 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
     UIView *followShape = nil;
     for (UIView *child in renderView.subviews) {
         if ([child isKindOfClass:gDKNoteInheritedClass]) {
-            [controls addObject:child];
+            if (DKNoteElementVisible(child)) [controls addObject:child];
         } else if ([child isKindOfClass:gDKNoteDrawingClass]) {
-            [texts addObject:child];
+            if (DKNoteElementVisible(child)) [texts addObject:child];
         } else if ([child isKindOfClass:gDKNoteShapeClass]) {
-            followShape = child;
+            if (DKNoteElementVisible(child)) followShape = child;
         } else if ([child isKindOfClass:gDKNoteGraphicsClass]) {
             DKAdjustFade(child, 0.0, CGSizeZero);  // 底部分隔线
         }
@@ -143,7 +143,7 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
     UIView *name = texts.firstObject;
     CGPoint origin = [renderView convertPoint:CGPointZero toView:bar];
     CGFloat width = CGRectGetWidth(renderView.bounds);
-    CGRect backFrame = DKNoteNativeFrame(back);
+    CGRect backFrame = DKAdjustLayoutFrame(back);
     CGFloat top = CGRectGetMidY(backFrame) - kDKNoteTopHeight * 0.5;
     NSMutableArray<DKNoteHit *> *hits = [NSMutableArray array];
 
@@ -154,7 +154,7 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
     CGFloat cursor = CGRectGetMaxX(backGlass) + kDKNoteClusterGap;
 
     if (avatar) {
-        CGRect frame = DKNoteNativeFrame(avatar);
+        CGRect frame = DKAdjustLayoutFrame(avatar);
         CGRect glass = CGRectMake(cursor, top, kDKNoteTopHeight, kDKNoteTopHeight);
         DKAdjustTransform(avatar, CGAffineTransformMakeTranslation(CGRectGetMidX(glass) - CGRectGetMidX(frame), 0.0));
         DKNotePlaceGlass(store, avatar, bar, glass, origin);
@@ -162,7 +162,7 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
         cursor = CGRectGetMaxX(glass) + kDKNoteClusterGap;
     }
 
-    CGRect searchFrame = DKNoteNativeFrame(search);
+    CGRect searchFrame = DKAdjustLayoutFrame(search);
     CGRect searchGlass = CGRectMake(width - kDKNoteEdge - kDKNoteTopHeight, top, kDKNoteTopHeight, kDKNoteTopHeight);
     DKAdjustTransform(search, CGAffineTransformMakeTranslation(CGRectGetMidX(searchGlass) - CGRectGetMidX(searchFrame), 0.0));
     DKNotePlaceGlass(store, search, bar, searchGlass, origin);
@@ -170,7 +170,7 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
     CGFloat limit = CGRectGetMinX(searchGlass) - kDKNoteEdge;
 
     if (followShape) {
-        CGRect frame = DKNoteNativeFrame(followShape);
+        CGRect frame = DKAdjustLayoutFrame(followShape);
         DKAdjustFade(followShape, 0.0, CGSizeZero);
         CGRect glass = CGRectMake(CGRectGetMinX(frame), top, CGRectGetWidth(frame), kDKNoteTopHeight);
         DKNotePlaceGlass(store, followShape, bar, glass, origin);
@@ -179,7 +179,7 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
     }
 
     if (name && CGRectGetWidth(name.bounds) > 0.0 && (!followShape || texts.count > 1)) {
-        CGRect frame = DKNoteNativeFrame(name);
+        CGRect frame = DKAdjustLayoutFrame(name);
         CGFloat capsuleWidth = CGRectGetWidth(frame) + kDKNoteNamePadding * 2.0;
         CGRect glass = CGRectMake(cursor, top, MIN(capsuleWidth, limit - cursor), kDKNoteTopHeight);
         DKAdjustTransform(name, CGAffineTransformMakeTranslation(cursor + kDKNoteNamePadding - CGRectGetMinX(frame), 0.0));
@@ -216,7 +216,7 @@ static void DKNoteSyncBottomBar(DKChatGlassStore *store, UIView *bar, UIView *re
 
     CGPoint origin = [renderView convertPoint:CGPointZero toView:bar];
     CGFloat width = CGRectGetWidth(renderView.bounds);
-    CGRect inputFrame = DKNoteNativeFrame(inputHost);
+    CGRect inputFrame = DKAdjustLayoutFrame(inputHost);
     CGFloat top = CGRectGetMidY(inputFrame) - kDKNoteBottomHeight * 0.5;
 
     CGRect inputGlass = CGRectMake(kDKNoteEdge, top, CGRectGetMaxX(inputFrame) - kDKNoteEdge, kDKNoteBottomHeight);
@@ -229,8 +229,8 @@ static void DKNoteSyncBottomBar(DKChatGlassStore *store, UIView *bar, UIView *re
     // 四键在胶囊内整体居中，数字与图标同步移位。
     CGRect capsule = CGRectMake(CGRectGetMaxX(inputGlass) + kDKNoteEdge, top,
                                 width - kDKNoteEdge - CGRectGetMaxX(inputGlass) - kDKNoteEdge, kDKNoteBottomHeight);
-    CGRect firstIcon = DKNoteNativeFrame(icons.firstObject);
-    CGRect lastIcon = DKNoteNativeFrame(icons.lastObject);
+    CGRect firstIcon = DKAdjustLayoutFrame(icons.firstObject);
+    CGRect lastIcon = DKAdjustLayoutFrame(icons.lastObject);
     CGFloat shift = CGRectGetMidX(capsule) - (CGRectGetMinX(firstIcon) + CGRectGetMaxX(lastIcon)) * 0.5;
     CGAffineTransform translation = CGAffineTransformMakeTranslation(shift, 0.0);
     for (UIView *icon in icons) DKAdjustTransform(icon, translation);
@@ -241,10 +241,10 @@ static void DKNoteSyncBottomBar(DKChatGlassStore *store, UIView *bar, UIView *re
     NSMutableArray<DKNoteHit *> *hits = [NSMutableArray arrayWithCapacity:icons.count];
     CGFloat left = CGRectGetMinX(capsule);
     for (NSUInteger index = 0; index < icons.count; index++) {
-        CGRect frame = DKNoteNativeFrame(icons[index]);
+        CGRect frame = DKAdjustLayoutFrame(icons[index]);
         CGFloat right = CGRectGetMaxX(capsule);
         if (index + 1 < icons.count) {
-            right = (CGRectGetMidX(frame) + CGRectGetMidX(DKNoteNativeFrame(icons[index + 1]))) * 0.5 + shift;
+            right = (CGRectGetMidX(frame) + CGRectGetMidX(DKAdjustLayoutFrame(icons[index + 1]))) * 0.5 + shift;
         }
         CGRect segment = CGRectMake(left, top, right - left, kDKNoteBottomHeight);
         [hits addObject:DKNoteMakeHit(segment, DKNoteCenter(frame), renderView, touchView)];
@@ -298,12 +298,41 @@ static void DKNoteRefresh(void) {
     for (UIView *renderView in gDKNoteRenderViews.allObjects) DKNoteSync(renderView);
 }
 
+// 元素布局的指纹：只取布局 frame，不含本模块写入的 transform，用于判断几何是否还在变。
+static NSString *DKNoteLayoutSignature(UIView *renderView) {
+    NSMutableString *signature = [NSMutableString string];
+    for (UIView *child in renderView.subviews) {
+        CGRect frame = DKAdjustLayoutFrame(child);
+        [signature appendFormat:@"%.1f,%.1f,%.1f,%.1f;",
+         frame.origin.x, frame.origin.y, frame.size.width, frame.size.height];
+    }
+    return signature;
+}
+
+static void DKNoteSyncDeferred(UIView *renderView, NSUInteger remaining);
+
+// DanceUI 在这一轮 layoutSubviews 之后才写元素的尺寸，同一轮读到的还是上一轮的几何：
+// 顶栏收起 / 展开时玻璃会按旧形态摆放，头像和关注框的玻璃也留在原地。
+// 等布局提交后的下一轮再同步一次；几何仍在变就再补，最多两次。
+static void DKNoteSyncDeferred(UIView *renderView, NSUInteger remaining) {
+    if (remaining == 0) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!renderView.window) return;
+        NSString *before = DKNoteLayoutSignature(renderView);
+        DKNoteSync(renderView);
+        if (![DKNoteLayoutSignature(renderView) isEqualToString:before]) {
+            DKNoteSyncDeferred(renderView, remaining - 1);
+        }
+    });
+}
+
 %group DKNoteDetailGlassHooks
 // 元素增减与尺寸变化都会让渲染视图重新布局，每轮按当前元素同步。
 %hook DKNoteRenderView
 - (void)layoutSubviews {
     %orig;
     DKNoteSync(self);
+    DKNoteSyncDeferred(self, 2);
 }
 %end
 
