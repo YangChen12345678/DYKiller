@@ -123,14 +123,8 @@ static NSArray<UIView *> *DKChatTopItems(AWENavigationBar *bar) {
 static CGRect DKChatTopArrowRect(UIButton *button, UIView *carrier) {
     [button layoutIfNeeded];
     UIImageView *icon = button.imageView;
-    UIImage *image = icon.image;
-    if (!image || CGRectIsEmpty(icon.bounds)) return [button convertRect:button.bounds toView:carrier];
-    CGRect pixels = DKImageOpaquePixelRect(image);
-    if (CGRectIsNull(pixels)) return [icon convertRect:icon.bounds toView:carrier];
-    CGFloat scaleX = CGRectGetWidth(icon.bounds) / (image.size.width * image.scale);
-    CGFloat scaleY = CGRectGetHeight(icon.bounds) / (image.size.height * image.scale);
-    CGRect visible = CGRectMake(CGRectGetMinX(pixels) * scaleX, CGRectGetMinY(pixels) * scaleY,
-                                CGRectGetWidth(pixels) * scaleX, CGRectGetHeight(pixels) * scaleY);
+    CGRect visible = DKImageOpaqueVisibleRect(icon);
+    if (CGRectIsNull(visible)) return [button convertRect:button.bounds toView:carrier];
     return [icon convertRect:visible toView:carrier];
 }
 
