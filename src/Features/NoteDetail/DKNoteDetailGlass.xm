@@ -428,15 +428,16 @@ static void DKNoteHideCommentSegment(UIView *scroller) {
 - (void)setContentOffset:(CGPoint)contentOffset {
     %orig;
     // 离屏 / 正在退场的滚动视图不再触发，避免退场时野指针。
-    if (!self.window) return;
+    // %hook 里的 self 是 __unsafe_unretained id const，点语法取属性编译不过，必须用消息发送。
+    if (![self window]) return;
     if (objc_getAssociatedObject(self, &kDKNoteScrollPendingKey)) return;
     objc_setAssociatedObject(self, &kDKNoteScrollPendingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     dispatch_async(dispatch_get_main_queue(), ^{
         objc_setAssociatedObject(self, &kDKNoteScrollPendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        if (!self.window) return;
+        if (![self window]) return;
         DKNoteHideCommentSegment(self);
         for (UIView *renderView in gDKNoteRenderViews.allObjects) {
-            if (renderView.window) DKNoteSyncIfChanged(renderView);
+            if ([renderView window]) DKNoteSyncIfChanged(renderView);
         }
     });
 }
