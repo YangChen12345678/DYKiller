@@ -114,19 +114,30 @@ static UIScrollView *DKNoteScrollerForBar(UIView *bar) {
 
 static void DKNoteHideCommentSegment(UIView *scroller);
 
-// 关掉外层滚动视图的裁剪，内容才能滚到顶栏下方；布局与 inset 保持原生。
+// 记录并关掉一个视图的裁剪；overflow 为 NO 时按记录还原。
+static void DKNoteSetClipsDisabled(UIView *view, BOOL disabled) {
+    if (!view) return;
+    NSNumber *saved = objc_getAssociatedObject(view, &kDKNoteScrollerClipsKey);
+    if (disabled) {
+        if (!saved) objc_setAssociatedObject(view, &kDKNoteScrollerClipsKey, @(view.clipsToBounds), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (view.clipsToBounds) view.clipsToBounds = NO;
+    } else if (saved) {
+        view.clipsToBounds = saved.boolValue;
+        objc_setAssociatedObject(view, &kDKNoteScrollerClipsKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
+
+// 关掉滚动容器的裁剪，内容才能滚到顶栏、底栏下方；布局与 inset 保持原生。
+// 外层 AWETabListContainerScrollView 与内层 AWETabListTabContainerScrollView 各裁一次，
+// 只关外层时内容仍会被内层切在栏底下沿，看起来就是一条白色遮罩。
 static void DKNoteSetContentOverflow(UIView *bar, BOOL overflow) {
     UIScrollView *scroller = DKNoteScrollerForBar(bar);
     if (!scroller) return;
-    NSNumber *saved = objc_getAssociatedObject(scroller, &kDKNoteScrollerClipsKey);
-    if (overflow) {
-        if (!saved) objc_setAssociatedObject(scroller, &kDKNoteScrollerClipsKey, @(scroller.clipsToBounds), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        if (scroller.clipsToBounds) scroller.clipsToBounds = NO;
-        DKNoteHideCommentSegment(scroller);
-    } else if (saved) {
-        scroller.clipsToBounds = saved.boolValue;
-        objc_setAssociatedObject(scroller, &kDKNoteScrollerClipsKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    DKNoteSetClipsDisabled(scroller, overflow);
+    for (UIView *child in scroller.subviews) {
+        if ([child isKindOfClass:[UIScrollView class]]) DKNoteSetClipsDisabled(child, overflow);
     }
+    if (overflow) DKNoteHideCommentSegment(scroller);
 }
 
 API_AVAILABLE(ios(26.0))
