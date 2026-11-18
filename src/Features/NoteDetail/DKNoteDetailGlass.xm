@@ -44,6 +44,7 @@ static NSHashTable<UIView *> *gDKNoteRenderViews;
 static char kDKNoteHitsKey;
 static char kDKNoteInputHitKey;
 static char kDKNoteScrollerClipsKey;
+static char kDKNoteScrollShiftKey;
 static char kDKNoteLastSignatureKey;
 static char kDKNoteScrollPendingKey;
 
@@ -114,6 +115,9 @@ static UIScrollView *DKNoteScrollerForBar(UIView *bar) {
 
 static void DKNoteHideCommentSegment(UIView *scroller);
 
+// 调整 frame / inset 期间置位：滚动回调据此跳过，避免自己改自己。
+static BOOL gDKNoteAdjusting;
+
 // 记录并关掉一个视图的裁剪；overflow 为 NO 时按记录还原。
 static void DKNoteSetClipsDisabled(UIView *view, BOOL disabled) {
     if (!view) return;
@@ -127,12 +131,57 @@ static void DKNoteSetClipsDisabled(UIView *view, BOOL disabled) {
     }
 }
 
-// 关掉滚动容器的裁剪，内容才能滚到顶栏、底栏下方；布局与 inset 保持原生。
+// 把外层滚动容器整体上移到屏幕顶边，同时用 contentInset 与 contentOffset 抵消，
+// 内容视觉位置不变，但滚动容器的 bounds 覆盖到栏下——内容是在自己的区域内绘制，
+// 不再靠 clipsToBounds 溢出，单元格子视图（头像等）也就不会被平切。
+static void DKNoteSetScrollerExtended(UIScrollView *scroller, BOOL extended) {
+    if (!scroller || gDKNoteAdjusting) return;
+    NSNumber *applied = objc_getAssociatedObject(scroller, &kDKNoteScrollShiftKey);
+    if (extended) {
+        CGFloat shift = scroller.frame.origin.y;
+        if (shift <= 0.5) return;
+        CGRect frame = scroller.frame;
+        UIEdgeInsets inset = scroller.contentInset;
+        CGPoint offset = scroller.contentOffset;
+        frame.size.height += shift;
+        frame.origin.y = 0;
+        inset.top += shift;
+        offset.y -= shift;
+        objc_setAssociatedObject(scroller, &kDKNoteScrollShiftKey,
+                                 @(shift), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        gDKNoteAdjusting = YES;
+        scroller.frame = frame;
+        scroller.contentInset = inset;
+        scroller.scrollIndicatorInsets = inset;
+        scroller.contentOffset = offset;
+        gDKNoteAdjusting = NO;
+    } else {
+        CGFloat shift = applied.doubleValue;
+        if (shift <= 0.5) return;
+        CGRect frame = scroller.frame;
+        UIEdgeInsets inset = scroller.contentInset;
+        CGPoint offset = scroller.contentOffset;
+        frame.origin.y += shift;
+        frame.size.height -= shift;
+        inset.top = MAX(0.0, inset.top - shift);
+        offset.y += shift;
+        gDKNoteAdjusting = YES;
+        scroller.frame = frame;
+        scroller.contentInset = inset;
+        scroller.scrollIndicatorInsets = inset;
+        scroller.contentOffset = offset;
+        gDKNoteAdjusting = NO;
+        objc_setAssociatedObject(scroller, &kDKNoteScrollShiftKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
+
+// 关掉滚动容器的裁剪，并把外层容器上移到栏下；布局与 inset 相对原生保持不变。
 // 外层 AWETabListContainerScrollView 与内层 AWETabListTabContainerScrollView 各裁一次，
 // 只关外层时内容仍会被内层切在栏底下沿，看起来就是一条白色遮罩。
 static void DKNoteSetContentOverflow(UIView *bar, BOOL overflow) {
     UIScrollView *scroller = DKNoteScrollerForBar(bar);
     if (!scroller) return;
+    DKNoteSetScrollerExtended(scroller, overflow);
     DKNoteSetClipsDisabled(scroller, overflow);
     for (UIView *child in scroller.subviews) {
         if ([child isKindOfClass:[UIScrollView class]]) DKNoteSetClipsDisabled(child, overflow);
@@ -438,6 +487,8 @@ static void DKNoteHideCommentSegment(UIView *scroller) {
 %hook DKNoteScroller
 - (void)setContentOffset:(CGPoint)contentOffset {
     %orig;
+    // 自己调整 frame / inset 时引起的偏移变化不触发同步。
+    if (gDKNoteAdjusting) return;
     // 离屏 / 正在退场的滚动视图不再触发，避免退场时野指针。
     // %hook 里的 self 是 __unsafe_unretained id const，点语法取属性编译不过，必须用消息发送。
     if (![self window]) return;
