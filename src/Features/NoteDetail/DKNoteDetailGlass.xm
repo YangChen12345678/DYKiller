@@ -431,13 +431,10 @@ static void DKNoteHideCommentSegment(UIView *scroller) {
     if (!self.window) return;
     if (objc_getAssociatedObject(self, &kDKNoteScrollPendingKey)) return;
     objc_setAssociatedObject(self, &kDKNoteScrollPendingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    __weak UIView *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIView *scroller = weakSelf;
-        if (!scroller) return;
-        objc_setAssociatedObject(scroller, &kDKNoteScrollPendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        if (!scroller.window) return;
-        DKNoteHideCommentSegment(scroller);
+        objc_setAssociatedObject(self, &kDKNoteScrollPendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (!self.window) return;
+        DKNoteHideCommentSegment(self);
         for (UIView *renderView in gDKNoteRenderViews.allObjects) {
             if (renderView.window) DKNoteSyncIfChanged(renderView);
         }
