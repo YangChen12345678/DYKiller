@@ -20,6 +20,7 @@
 @interface DKNoteRenderView : UIView @end
 @interface DKNoteBottomBar : UIView @end
 @interface DKNoteTopBarHost : UIView @end
+@interface DKNoteScroller : UIScrollView @end
 
 static const CGFloat kDKNoteTopHeight = 40.0;
 static const CGFloat kDKNoteBottomHeight = 46.0;
@@ -37,11 +38,14 @@ static Class gDKNoteGraphicsClass;
 static Class gDKNoteInputClass;
 static Class gDKNoteRenderClass;
 static Class gDKNoteScrollerClass;
+static Class gDKNoteSegmentClass;
 static NSHashTable<UIView *> *gDKNoteRenderViews;
 
 static char kDKNoteHitsKey;
 static char kDKNoteInputHitKey;
 static char kDKNoteScrollerClipsKey;
+static char kDKNoteLastSignatureKey;
+static char kDKNoteScrollPendingKey;
 
 // 一块玻璃的触摸区与原生元素中心，都是 Compose 触摸视图坐标。
 @interface DKNoteHit : NSObject
@@ -108,6 +112,8 @@ static UIScrollView *DKNoteScrollerForBar(UIView *bar) {
     return nil;
 }
 
+static void DKNoteHideCommentSegment(UIView *scroller);
+
 // 关掉外层滚动视图的裁剪，内容才能滚到顶栏下方；布局与 inset 保持原生。
 static void DKNoteSetContentOverflow(UIView *bar, BOOL overflow) {
     UIScrollView *scroller = DKNoteScrollerForBar(bar);
@@ -116,6 +122,7 @@ static void DKNoteSetContentOverflow(UIView *bar, BOOL overflow) {
     if (overflow) {
         if (!saved) objc_setAssociatedObject(scroller, &kDKNoteScrollerClipsKey, @(scroller.clipsToBounds), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         if (scroller.clipsToBounds) scroller.clipsToBounds = NO;
+        DKNoteHideCommentSegment(scroller);
     } else if (saved) {
         scroller.clipsToBounds = saved.boolValue;
         objc_setAssociatedObject(scroller, &kDKNoteScrollerClipsKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -381,6 +388,23 @@ static void DKNoteSyncBar(UIView *bar) {
     }
 }
 
+// 只有元素布局真正变化才同步，避免滚动时重复铺玻璃。
+static void DKNoteSyncIfChanged(UIView *renderView) {
+    NSString *signature = DKNoteLayoutSignature(renderView);
+    NSString *last = objc_getAssociatedObject(renderView, &kDKNoteLastSignatureKey);
+    if (last && [last isEqualToString:signature]) return;
+    objc_setAssociatedObject(renderView, &kDKNoteLastSignatureKey, signature, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    DKNoteSync(renderView);
+}
+
+// 隐藏评论区顶部的「评论 / 相关推荐」标签行：顶栏胶囊已经承载了这个切换，重复的一行去掉。
+static void DKNoteHideCommentSegment(UIView *scroller) {
+    if (!gDKNoteSegmentClass) return;
+    for (UIView *child in scroller.subviews) {
+        if ([child isKindOfClass:gDKNoteSegmentClass] && !child.hidden) child.hidden = YES;
+    }
+}
+
 %group DKNoteDetailGlassHooks
 // 元素增减与尺寸变化都会让渲染视图重新布局，每轮按当前元素同步。
 %hook DKNoteRenderView
@@ -395,6 +419,21 @@ static void DKNoteSyncBar(UIView *bar) {
 - (void)layoutSubviews {
     %orig;
     DKNoteSyncBar(self);
+}
+%end
+
+// 顶栏在滚动中切换形态（评论 / 相关推荐 ↔ 作者信息）时，渲染视图不一定重新布局，
+// 玻璃会停在上一形态。挂在滚动上，合并高频回调到下一轮，只在元素签名变化时同步。
+%hook DKNoteScroller
+- (void)setContentOffset:(CGPoint)contentOffset {
+    %orig;
+    if (objc_getAssociatedObject(self, &kDKNoteScrollPendingKey)) return;
+    objc_setAssociatedObject(self, &kDKNoteScrollPendingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        objc_setAssociatedObject(self, &kDKNoteScrollPendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        DKNoteHideCommentSegment(self);
+        for (UIView *renderView in gDKNoteRenderViews.allObjects) DKNoteSyncIfChanged(renderView);
+    });
 }
 %end
 
@@ -437,11 +476,12 @@ static void DKNoteSyncBar(UIView *bar) {
     gDKNoteGraphicsClass = objc_getClass("DanceUI._UIGraphicsView");
     gDKNoteInputClass = objc_getClass("AWEKnowledgeRichContentImpl.FullPageFeedCommentInputView");
     gDKNoteScrollerClass = objc_getClass("AWETabListContainerScrollView");
+    gDKNoteSegmentClass = objc_getClass("IESSegmentedControl");
     Class renderClass = objc_getClass("DanceUICompose.ComposeRenderingUIViewImpl");
     gDKNoteRenderClass = renderClass;
 
-    if (DKGlassOSAvailable() && renderClass && gDKNoteTopBarClass && gDKNoteBottomBarClass) {
+    if (DKGlassOSAvailable() && renderClass && gDKNoteTopBarClass && gDKNoteBottomBarClass && gDKNoteScrollerClass) {
         %init(DKNoteDetailGlassHooks, DKNoteRenderView=renderClass, DKNoteBottomBar=gDKNoteBottomBarClass,
-              DKNoteTopBarHost=gDKNoteTopBarClass);
+              DKNoteTopBarHost=gDKNoteTopBarClass, DKNoteScroller=gDKNoteScrollerClass);
     }
 }
