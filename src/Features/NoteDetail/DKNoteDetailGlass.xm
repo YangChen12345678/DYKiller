@@ -104,6 +104,26 @@ static UIVisualEffectView *DKNotePlaceGlass(DKChatGlassStore *store, UIView *sou
                           shape:DKChatGlassShapeRounded radius:CGRectGetHeight(rect) * 0.5 interactive:NO tint:nil];
 }
 
+static char kDKNoteSlotSourceKey;
+
+// 中间槽位的稳定来源：玻璃是 interactive:NO，不需要真实触摸源。
+// 用固定占位视图当 source，形态切换时 store 才能复用同一块玻璃；
+// 否则两侧按钮一变，中间 2~3 块 UIVisualEffectView 就被销毁重建，那一帧会顿一下。
+static UIView *DKNoteSlotSource(UIView *bar, NSUInteger index) {
+    NSMutableArray<UIView *> *sources = objc_getAssociatedObject(bar, &kDKNoteSlotSourceKey);
+    if (!sources) {
+        sources = [NSMutableArray array];
+        objc_setAssociatedObject(bar, &kDKNoteSlotSourceKey, sources, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    while (sources.count <= index) {
+        UIView *placeholder = [[UIView alloc] initWithFrame:CGRectZero];
+        placeholder.hidden = YES;
+        placeholder.userInteractionEnabled = NO;
+        [sources addObject:placeholder];
+    }
+    return sources[index];
+}
+
 static UIScrollView *DKNoteScrollerForBar(UIView *bar) {
     for (UIView *child in bar.superview.subviews) {
         for (UIView *inner in child.subviews) {
@@ -238,7 +258,7 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
         CGRect frame = DKAdjustLayoutFrame(avatar);
         CGRect glass = CGRectMake(cursor, top, kDKNoteTopHeight, kDKNoteTopHeight);
         DKAdjustTransform(avatar, CGAffineTransformMakeTranslation(CGRectGetMidX(glass) - CGRectGetMidX(frame), 0.0));
-        DKNotePlaceGlass(store, avatar, bar, glass, origin);
+        DKNotePlaceGlass(store, DKNoteSlotSource(bar, 0), bar, glass, origin);
         [hits addObject:DKNoteMakeHit(glass, DKNoteCenter(frame), renderView, touchView)];
         cursor = CGRectGetMaxX(glass) + kDKNoteClusterGap;
     }
@@ -254,7 +274,7 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
         CGRect frame = DKAdjustLayoutFrame(followShape);
         DKAdjustFade(followShape, 0.0, CGSizeZero);
         CGRect glass = CGRectMake(CGRectGetMinX(frame), top, CGRectGetWidth(frame), kDKNoteTopHeight);
-        DKNotePlaceGlass(store, followShape, bar, glass, origin);
+        DKNotePlaceGlass(store, DKNoteSlotSource(bar, 2), bar, glass, origin);
         [hits addObject:DKNoteMakeHit(glass, DKNoteCenter(frame), renderView, touchView)];
         limit = CGRectGetMinX(glass) - kDKNoteEdge;
     }
@@ -265,13 +285,14 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
             CGFloat capsuleWidth = CGRectGetWidth(frame) + kDKNoteNamePadding * 2.0;
             CGRect glass = CGRectMake(cursor, top, MIN(capsuleWidth, limit - cursor), kDKNoteTopHeight);
             DKAdjustTransform(name, CGAffineTransformMakeTranslation(cursor + kDKNoteNamePadding - CGRectGetMinX(frame), 0.0));
-            UIVisualEffectView *glassView = DKNotePlaceGlass(store, name, bar, glass, origin);
+            UIVisualEffectView *glassView = DKNotePlaceGlass(store, DKNoteSlotSource(bar, 1), bar, glass, origin);
             // 长用户名超出胶囊的部分裁掉。
             if (capsuleWidth > limit - cursor) [store maskView:name toGlass:glassView];
             [hits addObject:DKNoteMakeHit(glass, DKNoteCenter(frame), renderView, touchView)];
         }
     } else {
         // 标签形态：每个标签文字各铺一枚胶囊，按文字自身的中心原地放，文字不做移位。
+        NSUInteger slot = 0;
         for (UIView *text in texts) {
             CGRect frame = DKAdjustLayoutFrame(text);
             CGFloat available = limit - cursor;
@@ -281,9 +302,14 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
             DKAdjustTransform(text, CGAffineTransformIdentity);
             CGRect glass = CGRectMake(center - capsuleWidth * 0.5, CGRectGetMidY(frame) - kDKNoteTopHeight * 0.5,
                                       capsuleWidth, kDKNoteTopHeight);
-            DKNotePlaceGlass(store, text, bar, glass, origin);
+            DKNotePlaceGlass(store, DKNoteSlotSource(bar, slot), bar, glass, origin);
             [hits addObject:DKNoteMakeHit(glass, DKNoteCenter(frame), renderView, touchView)];
+            slot++;
         }
+        // 标签形态用不到第三块，但保留在很靠左的位置不释放：
+        // 释放后下次切回作者信息又要重建，那一帧会重新材质化。
+        if (slot < 3) DKNotePlaceGlass(store, DKNoteSlotSource(bar, 2), bar,
+                                       CGRectMake(-40.0, top, kDKNoteTopHeight, kDKNoteTopHeight), origin);
     }
 
     objc_setAssociatedObject(touchView, &kDKNoteHitsKey, hits, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
