@@ -55,7 +55,21 @@ jobs:
         run: bash .github/scripts/setup-theos.sh
 
       - name: Build DYKiller release assets
-        run: bash .github/scripts/build-packages.sh
+        run: |
+          set +e
+          bash .github/scripts/build-packages.sh 2>&1 | tee /tmp/dykiller-build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            {
+              echo '### Build failed'
+              echo '```'
+              grep -nE "error:|fatal error|Error |FAILED|\*\*\*" /tmp/dykiller-build.log | tail -60
+              echo '--- last 40 lines ---'
+              tail -40 /tmp/dykiller-build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi
 
       - name: Verify DYKiller release assets
         run: bash .github/scripts/verify-assets.sh
