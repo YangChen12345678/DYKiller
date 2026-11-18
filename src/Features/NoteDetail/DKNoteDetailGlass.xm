@@ -9,6 +9,7 @@
 //
 
 #import "DKChatGlassStore.h"
+#import "DKGlassFlexView.h"
 #import "DKGlassGuard.h"
 #import "DKKeys.h"
 #import "DKSettings.h"
@@ -349,6 +350,32 @@ static void DKNoteRestore(UIView *bar, UIView *renderView, UIView *touchView) {
     if ([bar isKindOfClass:gDKNoteTopBarClass]) DKNoteSetContentOverflow(bar, NO);
 }
 
+static char kDKNoteGlassPrevFrameKey;
+
+// 顶栏换形态时原生按钮是渐变过渡，玻璃直接跳位就会看着顿一下。
+// 记录每块玻璃上一轮的 frame，变化明显时按原生节奏补一段动画。
+static void DKNoteAnimateGlassFrameChanges(UIView *bar) {
+    for (UIView *view in bar.subviews) {
+        if (![view isKindOfClass:[DKGlassFlexView class]]) continue;
+        CGRect now = view.frame;
+        NSValue *saved = objc_getAssociatedObject(view, &kDKNoteGlassPrevFrameKey);
+        if (saved) {
+            CGRect from = saved.CGRectValue;
+            CGFloat delta = fabs(CGRectGetMinX(from) - CGRectGetMinX(now))
+                          + fabs(CGRectGetWidth(from) - CGRectGetWidth(now));
+            if (delta > 8.0) {
+                view.frame = from;
+                [UIView animateWithDuration:0.24 delay:0.0
+                                    options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
+                                 animations:^{ view.frame = now; }
+                                 completion:nil];
+            }
+        }
+        objc_setAssociatedObject(view, &kDKNoteGlassPrevFrameKey,
+                                 [NSValue valueWithCGRect:now], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
+
 static void DKNoteSync(UIView *renderView) {
     if (@available(iOS 26.0, *)) {
         UIView *bar = DKNoteBarForRenderView(renderView);
@@ -363,14 +390,16 @@ static void DKNoteSync(UIView *renderView) {
         }
         DKChatGlassStore *store = [DKChatGlassStore storeForOwner:bar create:YES];
         if (store.syncing) return;
+        BOOL topBar = [bar isKindOfClass:gDKNoteTopBarClass];
         [store beginWithClear:DKPrefBool(DKKeyNoteDetailGlassClear) style:bar.traitCollection.userInterfaceStyle];
         [store clearBackingOfView:bar];
-        if ([bar isKindOfClass:gDKNoteTopBarClass]) {
+        if (topBar) {
             DKNoteSyncTopBar(store, bar, renderView, touchView);
         } else {
             DKNoteSyncBottomBar(store, bar, renderView, touchView);
         }
         [store end];
+        if (topBar) DKNoteAnimateGlassFrameChanges(bar);
     }
 }
 
