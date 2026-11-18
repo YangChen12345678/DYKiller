@@ -153,7 +153,11 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
     [hits addObject:DKNoteMakeHit(backGlass, DKNoteCenter(backFrame), renderView, touchView)];
     CGFloat cursor = CGRectGetMaxX(backGlass) + kDKNoteClusterGap;
 
-    if (avatar) {
+    // 顶栏有两种形态：用户信息（头像 + 用户名 + 关注）与标签（评论 / 相关推荐）。
+    // 玻璃跟着当前形态走，标签形态下不再给已经不存在的头像、关注留位置。
+    BOOL userForm = avatar != nil;
+
+    if (userForm) {
         CGRect frame = DKAdjustLayoutFrame(avatar);
         CGRect glass = CGRectMake(cursor, top, kDKNoteTopHeight, kDKNoteTopHeight);
         DKAdjustTransform(avatar, CGAffineTransformMakeTranslation(CGRectGetMidX(glass) - CGRectGetMidX(frame), 0.0));
@@ -178,15 +182,31 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
         limit = CGRectGetMinX(glass) - kDKNoteEdge;
     }
 
-    if (name && CGRectGetWidth(name.bounds) > 0.0 && (!followShape || texts.count > 1)) {
-        CGRect frame = DKAdjustLayoutFrame(name);
-        CGFloat capsuleWidth = CGRectGetWidth(frame) + kDKNoteNamePadding * 2.0;
-        CGRect glass = CGRectMake(cursor, top, MIN(capsuleWidth, limit - cursor), kDKNoteTopHeight);
-        DKAdjustTransform(name, CGAffineTransformMakeTranslation(cursor + kDKNoteNamePadding - CGRectGetMinX(frame), 0.0));
-        UIVisualEffectView *glassView = DKNotePlaceGlass(store, name, bar, glass, origin);
-        // 长用户名超出胶囊的部分裁掉。
-        if (capsuleWidth > limit - cursor) [store maskView:name toGlass:glassView];
-        [hits addObject:DKNoteMakeHit(glass, DKNoteCenter(frame), renderView, touchView)];
+    if (userForm) {
+        if (name && CGRectGetWidth(name.bounds) > 0.0 && (!followShape || texts.count > 1)) {
+            CGRect frame = DKAdjustLayoutFrame(name);
+            CGFloat capsuleWidth = CGRectGetWidth(frame) + kDKNoteNamePadding * 2.0;
+            CGRect glass = CGRectMake(cursor, top, MIN(capsuleWidth, limit - cursor), kDKNoteTopHeight);
+            DKAdjustTransform(name, CGAffineTransformMakeTranslation(cursor + kDKNoteNamePadding - CGRectGetMinX(frame), 0.0));
+            UIVisualEffectView *glassView = DKNotePlaceGlass(store, name, bar, glass, origin);
+            // 长用户名超出胶囊的部分裁掉。
+            if (capsuleWidth > limit - cursor) [store maskView:name toGlass:glassView];
+            [hits addObject:DKNoteMakeHit(glass, DKNoteCenter(frame), renderView, touchView)];
+        }
+    } else {
+        // 标签形态：每个标签文字各铺一枚胶囊，按文字自身的中心原地放，文字不做移位。
+        for (UIView *text in texts) {
+            CGRect frame = DKAdjustLayoutFrame(text);
+            CGFloat available = limit - cursor;
+            if (available <= 0.0) break;
+            CGFloat capsuleWidth = MIN(CGRectGetWidth(frame) + kDKNoteNamePadding * 2.0, available);
+            CGFloat center = MIN(MAX(CGRectGetMidX(frame), cursor + capsuleWidth * 0.5), limit - capsuleWidth * 0.5);
+            DKAdjustTransform(text, CGAffineTransformIdentity);
+            CGRect glass = CGRectMake(center - capsuleWidth * 0.5, CGRectGetMidY(frame) - kDKNoteTopHeight * 0.5,
+                                      capsuleWidth, kDKNoteTopHeight);
+            DKNotePlaceGlass(store, text, bar, glass, origin);
+            [hits addObject:DKNoteMakeHit(glass, DKNoteCenter(frame), renderView, touchView)];
+        }
     }
 
     objc_setAssociatedObject(touchView, &kDKNoteHitsKey, hits, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
