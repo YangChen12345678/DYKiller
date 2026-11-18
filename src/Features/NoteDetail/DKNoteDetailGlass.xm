@@ -146,6 +146,13 @@ static void DKNoteSyncTopBar(DKChatGlassStore *store, UIView *bar, UIView *rende
     UIView *name = texts.firstObject;
     CGPoint origin = [renderView convertPoint:CGPointZero toView:bar];
     CGFloat width = CGRectGetWidth(renderView.bounds);
+
+    // 关键：先把本模块上一轮写入的 transform 全部复位，读到的才是纯原生几何。
+    // layer.position 会带上 transform 的位移，不复位就每轮在上一轮已移位的基础上再算一次，位置越漂越远。
+    for (UIView *control in controls) DKAdjustTransform(control, CGAffineTransformIdentity);
+    for (UIView *text in texts) DKAdjustTransform(text, CGAffineTransformIdentity);
+    if (followShape) DKAdjustTransform(followShape, CGAffineTransformIdentity);
+
     CGRect backFrame = DKAdjustLayoutFrame(back);
     CGFloat top = CGRectGetMidY(backFrame) - kDKNoteTopHeight * 0.5;
     NSMutableArray<DKNoteHit *> *hits = [NSMutableArray array];
