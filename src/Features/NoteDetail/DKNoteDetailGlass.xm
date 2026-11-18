@@ -149,14 +149,21 @@ static void DKNoteSetClipsDisabled(UIView *view, BOOL disabled) {
 }
 
 // 关掉滚动容器的裁剪，内容才能透到顶栏、底栏下方；布局与 inset 保持原生。
-// 外层 AWETabListContainerScrollView 与内层 AWETabListTabContainerScrollView 各裁一次，
-// 只关外层时内容仍会被内层切在栏底下沿，看起来就是一条白色遮罩。
+// 外层 AWETabListContainerScrollView、分页容器、以及每一页自己的滚动 / 集合视图
+// 都会各裁一次，必须逐层关掉；只关外层时内容仍会被内层切在栏底下沿，
+// 看起来就是一条白色遮罩——「相关推荐」页尤其明显，因为它有自己的分页容器。
 static void DKNoteSetContentOverflow(UIView *bar, BOOL overflow) {
     UIScrollView *scroller = DKNoteScrollerForBar(bar);
     if (!scroller) return;
     DKNoteSetClipsDisabled(scroller, overflow);
-    for (UIView *child in scroller.subviews) {
-        if ([child isKindOfClass:[UIScrollView class]]) DKNoteSetClipsDisabled(child, overflow);
+    NSMutableArray<UIView *> *stack = [NSMutableArray array];
+    [stack addObjectsFromArray:scroller.subviews];
+    NSUInteger guard = 0;
+    while (stack.count > 0 && guard++ < 64) {
+        UIView *node = stack.lastObject;
+        [stack removeLastObject];
+        if ([node isKindOfClass:[UIScrollView class]]) DKNoteSetClipsDisabled(node, overflow);
+        [stack addObjectsFromArray:node.subviews];
     }
     if (overflow) DKNoteHideCommentSegment(scroller);
 }
