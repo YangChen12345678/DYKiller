@@ -19,6 +19,7 @@
 
 @interface DKNoteRenderView : UIView @end
 @interface DKNoteBottomBar : UIView @end
+@interface DKNoteTopBarHost : UIView @end
 
 static const CGFloat kDKNoteTopHeight = 40.0;
 static const CGFloat kDKNoteBottomHeight = 46.0;
@@ -33,6 +34,7 @@ static Class gDKNoteDrawingClass;
 static Class gDKNoteShapeClass;
 static Class gDKNoteGraphicsClass;
 static Class gDKNoteInputClass;
+static Class gDKNoteRenderClass;
 static Class gDKNoteScrollerClass;
 static NSHashTable<UIView *> *gDKNoteRenderViews;
 
@@ -346,6 +348,21 @@ static void DKNoteSyncDeferred(UIView *renderView, NSUInteger remaining) {
     });
 }
 
+// 顶栏收起 / 展开由宿主自身布局驱动，渲染视图不一定会再走 layoutSubviews；
+// 在宿主这一层按当前层级找到渲染视图补一次同步，玻璃才会跟着形态换。
+static void DKNoteSyncBar(UIView *bar) {
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:bar];
+    while (stack.count > 0) {
+        UIView *node = stack.lastObject;
+        [stack removeLastObject];
+        if ([node isKindOfClass:gDKNoteRenderClass]) {
+            DKNoteSync(node);
+            continue;
+        }
+        [stack addObjectsFromArray:node.subviews];
+    }
+}
+
 %group DKNoteDetailGlassHooks
 // 元素增减与尺寸变化都会让渲染视图重新布局，每轮按当前元素同步。
 %hook DKNoteRenderView
@@ -353,6 +370,13 @@ static void DKNoteSyncDeferred(UIView *renderView, NSUInteger remaining) {
     %orig;
     DKNoteSync(self);
     DKNoteSyncDeferred(self, 2);
+}
+%end
+
+%hook DKNoteTopBarHost
+- (void)layoutSubviews {
+    %orig;
+    DKNoteSyncBar(self);
 }
 %end
 
@@ -396,8 +420,10 @@ static void DKNoteSyncDeferred(UIView *renderView, NSUInteger remaining) {
     gDKNoteInputClass = objc_getClass("AWEKnowledgeRichContentImpl.FullPageFeedCommentInputView");
     gDKNoteScrollerClass = objc_getClass("AWETabListContainerScrollView");
     Class renderClass = objc_getClass("DanceUICompose.ComposeRenderingUIViewImpl");
+    gDKNoteRenderClass = renderClass;
 
     if (DKGlassOSAvailable() && renderClass && gDKNoteTopBarClass && gDKNoteBottomBarClass) {
-        %init(DKNoteDetailGlassHooks, DKNoteRenderView=renderClass, DKNoteBottomBar=gDKNoteBottomBarClass);
+        %init(DKNoteDetailGlassHooks, DKNoteRenderView=renderClass, DKNoteBottomBar=gDKNoteBottomBarClass,
+              DKNoteTopBarHost=gDKNoteTopBarClass);
     }
 }
