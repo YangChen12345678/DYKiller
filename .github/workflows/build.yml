@@ -55,21 +55,22 @@ jobs:
         run: bash .github/scripts/setup-theos.sh
 
       - name: Build DYKiller release assets
+        shell: bash
         run: |
           set +e
-          bash .github/scripts/build-packages.sh 2>&1 | tee /tmp/dykiller-build.log
-          status=${PIPESTATUS[0]}
+          bash .github/scripts/build-packages.sh > /tmp/dykiller-build.log 2>&1
+          status=$?
           if [ "$status" -ne 0 ]; then
-            {
-              echo '### Build failed'
-              echo '```'
-              grep -nE "error:|fatal error|Error |FAILED|\*\*\*" /tmp/dykiller-build.log | tail -60
-              echo '--- last 40 lines ---'
-              tail -40 /tmp/dykiller-build.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit "$status"
+            # 失败时把编译错误转成注解：远端可通过 check-runs API 直接读到，无需下载日志。
+            grep -nE "error:|fatal error|Error [0-9]|\*\*\*" /tmp/dykiller-build.log | tail -10 | while IFS= read -r line; do
+              line=${line//'%'/'%25'}
+              line=${line//$'\r'/}
+              echo "::error title=compile::${line}"
+            done
+            last=$(tail -5 /tmp/dykiller-build.log | tr '\n' '|' | tr -d '\r' | cut -c1-800)
+            echo "::error title=build-tail::${last//'%'/'%25'}"
           fi
+          exit $status
 
       - name: Verify DYKiller release assets
         run: bash .github/scripts/verify-assets.sh
