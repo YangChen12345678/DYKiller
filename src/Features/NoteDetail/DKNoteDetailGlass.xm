@@ -26,6 +26,7 @@ static const CGFloat kDKNoteBottomHeight = 46.0;
 static const CGFloat kDKNoteEdge = 8.0;          // 屏幕边距、不同分组之间的间距
 static const CGFloat kDKNoteClusterGap = 4.0;    // 返回、头像、用户名之间的间距
 static const CGFloat kDKNoteNamePadding = 12.0;  // 用户名胶囊的左右内边距
+static const CGFloat kDKNoteInputMinWidth = 96.0;  // 底栏输入框给四键胶囊让位后的最小宽度
 
 static Class gDKNoteTopBarClass;
 static Class gDKNoteBottomBarClass;
@@ -241,19 +242,29 @@ static void DKNoteSyncBottomBar(DKChatGlassStore *store, UIView *bar, UIView *re
     CGRect inputFrame = DKAdjustLayoutFrame(inputHost);
     CGFloat top = CGRectGetMidY(inputFrame) - kDKNoteBottomHeight * 0.5;
 
-    CGRect inputGlass = CGRectMake(kDKNoteEdge, top, CGRectGetMaxX(inputFrame) - kDKNoteEdge, kDKNoteBottomHeight);
+    // 四键与数字的实际占位决定胶囊宽度：数字比图标宽时按数字算，末位数字才不会露在玻璃外。
+    CGFloat contentLeft = CGRectGetMinX(DKAdjustLayoutFrame(icons.firstObject));
+    CGFloat contentRight = CGRectGetMaxX(DKAdjustLayoutFrame(icons.lastObject));
+    for (UIView *count in counts) {
+        CGRect frame = DKAdjustLayoutFrame(count);
+        contentLeft = MIN(contentLeft, CGRectGetMinX(frame));
+        contentRight = MAX(contentRight, CGRectGetMaxX(frame));
+    }
+    CGFloat capsuleWidth = contentRight - contentLeft + kDKNoteNamePadding * 2.0;
+    capsuleWidth = MIN(capsuleWidth, width - kDKNoteEdge * 2.0 - kDKNoteInputMinWidth);
+    CGRect capsule = CGRectMake(width - kDKNoteEdge - capsuleWidth, top, capsuleWidth, kDKNoteBottomHeight);
+
+    // 输入框让出胶囊需要的那部分宽度，其余保持原生位置。
+    CGFloat inputRight = MIN(CGRectGetMaxX(inputFrame), CGRectGetMinX(capsule) - kDKNoteEdge);
+    CGRect inputGlass = CGRectMake(kDKNoteEdge, top, MAX(inputRight - kDKNoteEdge, 0.0), kDKNoteBottomHeight);
     DKNotePlaceGlass(store, input, bar, inputGlass, origin);
     DKNoteInputHit *inputHit = [DKNoteInputHit new];
     inputHit.input = input;
     inputHit.rect = CGRectOffset(inputGlass, origin.x, origin.y);
     objc_setAssociatedObject(bar, &kDKNoteInputHitKey, inputHit, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    // 四键在胶囊内整体居中，数字与图标同步移位。
-    CGRect capsule = CGRectMake(CGRectGetMaxX(inputGlass) + kDKNoteEdge, top,
-                                width - kDKNoteEdge - CGRectGetMaxX(inputGlass) - kDKNoteEdge, kDKNoteBottomHeight);
-    CGRect firstIcon = DKAdjustLayoutFrame(icons.firstObject);
-    CGRect lastIcon = DKAdjustLayoutFrame(icons.lastObject);
-    CGFloat shift = CGRectGetMidX(capsule) - (CGRectGetMinX(firstIcon) + CGRectGetMaxX(lastIcon)) * 0.5;
+    // 四键与数字整体在胶囊内居中，数字与图标同步移位。
+    CGFloat shift = CGRectGetMidX(capsule) - (contentLeft + contentRight) * 0.5;
     CGAffineTransform translation = CGAffineTransformMakeTranslation(shift, 0.0);
     for (UIView *icon in icons) DKAdjustTransform(icon, translation);
     for (UIView *count in counts) DKAdjustTransform(count, translation);
